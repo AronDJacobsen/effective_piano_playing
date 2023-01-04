@@ -32,17 +32,23 @@ class random_walk(torch.nn.Module):
 
 
 class reinforce(torch.nn.Module):
-
-    def __init__(self, state_length=4, action_shape=4, gamma=1.0, hidden_size=32):
+    '''
+    inspiration from:
+    https://goodboychan.github.io/python/reinforcement_learning/pytorch/udacity/2021/05/12/REINFORCE-CartPole.html
+    '''
+    def __init__(self, state_length=4, action_shape=4, gamma=1.0, hidden_size=500):
         super().__init__()
         # for policy network
         self.policy = torch.nn.Sequential(
             nn.Linear(state_length, hidden_size),
+            #nn.LayerNorm(hidden_size),
+            nn.LeakyReLU(),
             nn.Linear(hidden_size, sum(action_shape)),
         )
         self.action_shape = tuple(action_shape)
-        self.optimizer = optim.Adam(self.policy.parameters(), lr=1e-2)
+        self.optimizer = optim.AdamW(self.policy.parameters(), lr=1e-5, amsgrad=True)
         self.gamma = gamma
+        self.eps = np.finfo(np.float32).eps.item()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -76,14 +82,17 @@ class reinforce(torch.nn.Module):
                 # Sample the action from current policy
                 action, log_prob = self.get_action(state)
                 saved_log_probs.append(log_prob)
+                # save
+                saved_states[env.num_steps] = state
+                saved_actions[env.num_steps] = action
+                # reward and new state
                 state, reward, done, _ = env.step(action)
-                saved_states[env.num_steps-1] = state
-                saved_actions[env.num_steps-1] = action
                 rewards.append(reward)
             # Calculate total expected reward
             scores_deque.append(sum(rewards))
             scores.append(sum(rewards))
 
+            # todo not working
             # Recalculate the total reward applying discounted factor
             discounts = [self.gamma ** i for i in range(len(rewards) + 1)]
             G = sum([a * b for a, b in zip(discounts, rewards)])
@@ -95,11 +104,27 @@ class reinforce(torch.nn.Module):
                 policy_loss.append(-log_prob * G)
             # After that, we concatenate whole policy loss in 0th dimension
             policy_loss = sum(policy_loss)
+            '''
 
+            # similar to pytorch implementation
+            R = 0
+            policy_loss = []
+            returns = []
+            for r in rewards[::-1]: # going backward
+                R = r + self.gamma * R
+                returns.append(R)
+            returns = torch.tensor(returns)
+            returns = (returns - returns.mean()) / (returns.std() + self.eps) # trick
+            #returns = torch.tensor(rewards) # seemed to work the best
+            for log_prob, R in zip(saved_log_probs, returns):
+                policy_loss.append(-log_prob * R)
+            policy_loss = sum(policy_loss)
+            '''
             # Backpropagation
             if self.training:
                 self.optimizer.zero_grad()
                 policy_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.policy.parameters(), 1)
                 self.optimizer.step()
 
             print('Episode:{} Score:{}'.format(episode, sum(rewards)))

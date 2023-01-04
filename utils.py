@@ -2,6 +2,7 @@
 import os
 from music21 import *
 import agents
+import numpy as np
 
 def train(env, episodes):
 
@@ -44,6 +45,55 @@ def get_agent(agent_type, state_length, action_shape):
         return agents.random_walk()
     elif agent_type == 'reinforce':
         return agents.reinforce(state_length=state_length, action_shape=action_shape)
+
+
+def get_notes(env, actions):
+    # actions to notes
+    notes = np.zeros((env.episode_length, env.num_fingers))
+    for a_idx, action in enumerate(actions):
+        for idx in range(env.num_hands):
+            move_hand = action[env.actions_per_hand * idx]
+            chord = action[env.actions_per_hand * idx + 1]
+            notes[a_idx, idx * env.fingers_on_each:(idx + 1) * env.fingers_on_each] = move_hand * (
+                        env.action_to_fingering[chord] != 0)
+            notes[a_idx, idx * env.fingers_on_each:(idx + 1) * env.fingers_on_each] += env.action_to_fingering[chord]
+    notes = notes.astype(int).astype(str)
+    return notes
+
+
+
+def evaluate(actions, notes, env):
+    print('\n')
+    # analysis
+    # precision
+    correct = 0
+    total = 0
+    for step in range(env.episode_length):
+        for note in env.initial_goals[step].split('.'):
+            if note in notes[step]:
+                correct += 1
+            total += 1
+    print(f'Number of correct: {correct} out of {total}')
+    print('\n')
+    # unique
+    print('Total unique actions: ', len(np.unique(actions, axis=0)))
+    differs = np.diff(actions, axis=0) ** 2  # for later
+    for idx, hand in enumerate(['left hand', 'right hand']):
+        print(f'Unique {hand} placements: ',
+              np.unique(actions[:, idx * env.num_hands]).astype(int).tolist())
+        print(f'Unique {hand} chords: ',
+              np.unique(actions[:, idx * env.num_hands + 1]).astype(int).tolist())
+    print('\n')
+    # how many changes
+    differs = np.diff(actions, axis=0) ** 2
+    print('Total changes:', sum(differs.sum(axis=1) != 0))
+    differs.sum(axis=0)
+    for idx, hand in enumerate(['left hand', 'right hand']):
+        diff = sum(differs[:, idx * env.num_hands:idx * env.num_hands + env.num_hands].sum(axis=1) != 0)
+        print(f'{hand} changes: ', diff)
+
+    print('\nEvaluation finished')
+
 
 
 

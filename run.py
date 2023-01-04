@@ -14,8 +14,8 @@ def get_arguments(parser):
         "--mode",
         type=str,
         help="Defines whether what mode to run in.",
-        default='traintest',
-        choices=['train', 'test', 'traintest']
+        default='stable_baselines3',
+        choices=['train', 'test', 'traintest', 'stable_baselines3']
     )
     parser.add_argument(
         "--experiment_name",
@@ -55,13 +55,13 @@ def get_arguments(parser):
         "--episodes",
         type=int,
         help="How many episodes to run (in 'train'-mode).",
-        default=200,
+        default=20_000,
     )
 
 
 if __name__ == '__main__':
     # Parse arguments
-    parser = argparse.ArgumentParser(description="Runs associated methods for Invariant Graph Neural Networks.")
+    parser = argparse.ArgumentParser(description="Runs associated methods for efficient piano fingering.")
     get_arguments(parser)
     args = parser.parse_args()
     # setting seeds
@@ -98,34 +98,27 @@ if __name__ == '__main__':
         agent.eval()
         # testing
         scores, states, actions = agent(env, 1)
-        print(f'Score if all wrong')
-
-        # analysis
-        # precision
-        correct = 0
-        for step in range(env.episode_length):
-            for note in env.goals[step].split('.'):
-                if note in states[step].astype(int).astype(str):
-                    correct += 1
-        print(f'Number of correct: {correct} out of {env.episode_length}')
         print('\n')
-        # unique
-        print('Total unique states/grips: ', len(np.unique(states, axis=0)))
-        differs = np.diff(actions, axis=0)**2 # for later
-        for idx, hand in enumerate(['left hand', 'right hand']):
-            print(f'Unique {hand} placements: ',
-                  np.unique(actions[:, idx*env.num_hands]).astype(int).tolist())
-            print(f'Unique {hand} chords: ',
-                  np.unique(actions[:, idx*env.num_hands+1]).astype(int).tolist())
-        print('\n')
-        # how many changes
-        differs = np.diff(actions, axis=0)**2
-        print('Total changes:', sum(differs.sum(axis=1) != 0))
-        differs.sum(axis=0)
-        for idx, hand in enumerate(['left hand', 'right hand']):
-            diff = sum(differs[:, idx * env.num_hands:idx * env.num_hands+env.num_hands].sum(axis=1) != 0)
-            print(f'{hand} changes: ', diff)
 
-        print('\nEvaluation finished')
+        notes = get_notes(env, actions)
+        evaluate(actions, notes, env)
 
 
+    elif 'stable_baselines3' in args.mode:
+        from stable_baselines3 import PPO, A2C
+
+        model = PPO("MlpPolicy", env, verbose=1)
+        model.learn(total_timesteps=args.episodes)
+
+        vec_env = model.get_env()
+        obs = vec_env.reset()
+        states = np.zeros((env.episode_length, env.state_length))
+        actions = np.zeros((env.episode_length, env.action_length))
+        for i in range(env.episode_length):
+            states[env.num_steps] = obs
+            action, _states = model.predict(obs, deterministic=True)
+            actions[env.num_steps] = action
+            obs, reward, done, info = vec_env.step(action)
+        env.close()
+        notes = get_notes(env, actions)
+        evaluate(actions, notes, env)
